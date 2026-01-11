@@ -8,7 +8,7 @@ on:
 
 env:
   # IMAGE will be constructed from secrets: PROJECT, REPO and IMAGE_NAME
-  IMAGE: demo-repo/${{ secrets.GCP_PROJECT }}/${{ secrets.ARTIFACT_REGISTRY_REPO }}/demo:${{ github.sha }}
+  IMAGE: us-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/${{ secrets.ARTIFACT_REGISTRY_REPO }}/demo:${{ github.sha }}
 
 jobs:
   build-and-deploy:
