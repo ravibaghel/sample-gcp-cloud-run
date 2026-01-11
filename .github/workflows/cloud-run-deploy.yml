@@ -74,3 +74,17 @@ jobs:
             --platform managed \
             --project ${{ secrets.GCP_PROJECT }} \
             --allow-unauthenticated
+
+      - name: Output Cloud Run service URL
+        run: |
+          SERVICE_NAME="demo-service"
+          PROJECT="${{ secrets.GCP_PROJECT }}"
+          REGION="${{ secrets.CLOUD_RUN_REGION }}"
+          echo "Retrieving URL for service: $SERVICE_NAME (project=$PROJECT, region=$REGION)"
+          URL=$(gcloud run services describe "$SERVICE_NAME" --platform managed --region "$REGION" --project "$PROJECT" --format="value(status.url)" 2>/dev/null || true)
+          if [ -n "$URL" ]; then
+            echo "Cloud Run service URL: $URL"
+          else
+            echo "WARNING: Cloud Run service URL not found. Deployment may not have completed or service might not be ready yet."
+            echo "You can check status with: gcloud run services describe $SERVICE_NAME --platform managed --region $REGION --project $PROJECT"
+          fi
