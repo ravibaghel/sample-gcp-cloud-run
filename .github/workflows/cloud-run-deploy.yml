@@ -42,6 +42,21 @@ jobs:
           gcloud config set project ${{ secrets.GCP_PROJECT }}
           gcloud config set run/region ${{ secrets.CLOUD_RUN_REGION }}
 
+      - name: Show computed image and verify Artifact Registry repository
+        run: |
+          REPO_NAME="${{ secrets.ARTIFACT_REGISTRY_REPO }}"
+          REGION="${{ secrets.CLOUD_RUN_REGION }}"
+          PROJECT="${{ secrets.GCP_PROJECT }}"
+          echo "Computed IMAGE: $IMAGE"
+          echo "Verifying Artifact Registry repository '$REPO_NAME' in region '$REGION' for project '$PROJECT'..."
+          if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+            echo "ERROR: Artifact Registry repository '$REPO_NAME' not found in region '$REGION' for project '$PROJECT'"
+            echo "Listing repositories in region '$REGION'..."
+            gcloud artifacts repositories list --location="$REGION" --project="$PROJECT" || true
+            exit 1
+          fi
+          echo "Repository '$REPO_NAME' exists in region '$REGION'."
+
       - name: Configure Docker to use gcloud credential helper for Artifact Registry
         run: |
           gcloud auth configure-docker ${{ secrets.CLOUD_RUN_REGION }}-docker.pkg.dev --quiet
