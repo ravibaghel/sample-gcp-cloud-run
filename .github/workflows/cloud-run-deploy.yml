@@ -1,0 +1,49 @@
+name: Build and push Docker image to GCR and deploy to Cloud Run
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  # Image name (uses GCP project from secrets)
+  IMAGE: gcr.io/${{ secrets.GCP_PROJECT }}/demo:${{ github.sha }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Install gcloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure gcloud project
+        run: |
+          gcloud config set project ${{ secrets.GCP_PROJECT }}
+
+      - name: Configure Docker to use gcloud credential helper
+        run: gcloud auth configure-docker --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build -t $IMAGE .
+
+      - name: Push Docker image
+        run: |
+          docker push $IMAGE
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy demo-service \
+            --image $IMAGE \
+            --region ${{ secrets.CLOUD_RUN_REGION }} \
+            --platform managed \
+            --project ${{ secrets.GCP_PROJECT }} \
+            --allow-unauthenticated
