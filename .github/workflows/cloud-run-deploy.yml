@@ -3,6 +3,7 @@ name: Build and push Docker image to GCR and deploy to Cloud Run
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:
 
 env:
   # Image name (uses GCP project from secrets)
