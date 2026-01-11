@@ -1,156 +1,134 @@
-# Spring Boot Cloud Run Sample
+# Spring Boot -> Cloud Run (GitHub Actions driven)
 
-This is a minimal Spring Boot application that returns "Hello, world!" at the root endpoint. It's intended as a demo for building and deploying to Google Cloud Run.
+This sample demonstrates a minimal Spring Boot application ("Hello, world!") and a GitHub Actions workflow that builds, publishes a Docker image to Google Artifact Registry and deploys to Cloud Run.
 
-Prerequisites
-- Java 17
-- Maven
-- Docker (optional for local container testing)
-- gcloud CLI configured with your Google Cloud project and authenticated
-- (Optional) GitHub account and `gh` CLI or web access to create a repo
+Goal for juniors
+- Run and test the service locally without installing Docker (just Java + Maven).
+- Push code to GitHub and manually trigger the provided GitHub Actions workflow to build the image and deploy to Cloud Run.
 
-Build and run locally
+Key idea: no Docker is required on the developer workstation — CI (GitHub Actions) builds and pushes the container.
 
-1. Build with Maven:
+Prerequisites (local workstation)
+- Java 17 (to run the app locally)
+- Maven (to build the jar)
+- Optional: `gh` CLI (convenient but not required for adding secrets)
+- A Google Cloud project and an account with permissions to create Artifact Registry repos and service accounts
+
+Quick local test (no Docker required)
+
+1. Build the application (from repository root):
 
 ```powershell
 mvn -B -DskipTests package
 ```
 
-2. Run the JAR locally:
+2. Run the application locally:
 
 ```powershell
 java -jar target/demo-0.0.1-SNAPSHOT.jar
 ```
 
-3. Test the endpoint:
+3. Test the endpoint in another shell:
 
 ```powershell
 curl http://localhost:8080/
-# Should return: Hello, world!
+# Expect: Hello, world!
 ```
 
-Build and run in Docker (local)
+GitHub Actions driven deployment — overview
+- The repository contains a workflow: `.github/workflows/cloud-run-deploy.yml`.
+- The workflow is manual (workflow_dispatch). After you push code to GitHub, you (or a teammate) can run the workflow from the Actions tab.
+- The workflow uses a service account key (stored in a GitHub Actions secret) to authenticate to GCP, builds the Docker image, pushes to Artifact Registry, and deploys to Cloud Run.
+
+High-level steps to prepare GCP and GitHub (copy-paste friendly PowerShell)
+
+Replace the placeholders PROJECT_ID, REGION, REPO and SA name with your values. Example values used in this repository: PROJECT_ID = `lingomatch-483108`, REGION = `asia-south2`, REPO = `demo-repo`, SA = `github-actions-deployer`.
+
+1) Create Artifact Registry repo (if not already present)
 
 ```powershell
-docker build -t demo:local .
-docker run --rm -p 8080:8080 demo:local
+$project = "PROJECT_ID"
+$region  = "asia-south2"   # or your chosen region
+$repo    = "demo-repo"
+
+# Enable API(s) if needed
+gcloud services enable artifactregistry.googleapis.com --project $project
+
+# Create the repo (regional)
+gcloud artifacts repositories create $repo --repository-format=docker --location=$region --description="Docker repo for demo" --project $project
 ```
 
-Deploy to Google Cloud Run
-
-1. Set your project and region:
+2) Create a service account and grant permissions (least-privilege for this sample)
 
 ```powershell
-gcloud config set project PROJECT_ID
-gcloud config set run/region REGION
+$saName = "github-actions-deployer"
+$saEmail = "$saName@$project.iam.gserviceaccount.com"
+
+# Create SA (skip if exists)
+gcloud iam service-accounts create $saName --display-name="GitHub Actions deployer" --project $project
+
+# Grant roles for Artifact Registry push and Cloud Run deploy
+gcloud projects add-iam-policy-binding $project --member="serviceAccount:$saEmail" --role="roles/artifactregistry.writer"
+gcloud projects add-iam-policy-binding $project --member="serviceAccount:$saEmail" --role="roles/run.admin"
+gcloud projects add-iam-policy-binding $project --member="serviceAccount:$saEmail" --role="roles/iam.serviceAccountUser"
+
+# Create a JSON key locally (key.json)
+gcloud iam service-accounts keys create key.json --iam-account=$saEmail --project $project
 ```
 
-2. Build and push a container image using Cloud Build (recommended):
+Important: keep `key.json` secret. You will copy its contents into a GitHub repository secret.
+
+3) Add required GitHub repository secrets
+
+Required secrets used by the workflow:
+- `GCP_PROJECT` — your project id (e.g. `lingomatch-483108`)
+- `CLOUD_RUN_REGION` — the region to deploy to (e.g. `asia-south2`)
+- `ARTIFACT_REGISTRY_REPO` — Artifact Registry repository name (e.g. `demo-repo`)
+- `GCP_SA_KEY` — contents of the `key.json` file (paste entire JSON)
+
+Add via GitHub UI: Repository -> Settings -> Secrets and variables -> Actions -> New repository secret. Or with `gh` CLI:
 
 ```powershell
-gcloud builds submit --tag gcr.io/PROJECT_ID/demo:latest
-```
-
-3. Deploy to Cloud Run:
-
-```powershell
-gcloud run deploy demo-service --image gcr.io/PROJECT_ID/demo:latest --platform managed --region REGION --allow-unauthenticated
-```
-
-After deployment, `gcloud` will print the service URL. A GET request to `/` should return `Hello, world!`.
-
-Push to GitHub
-
-1. Initialize git and commit (already done locally in this repo):
-
-```powershell
-# if you haven't already
-git init
-git add .
-git commit -m "chore: initial Spring Boot Cloud Run sample"
-```
-
-2. Create a remote repository and push (two options):
-
-- Using GitHub web UI: create a new repository and follow the instructions to push your local repo.
-- Using `gh` CLI (if installed and authenticated):
-
-```powershell
-gh repo create sample-gcp-cloud-run-demo --public --source=. --remote=origin --push
-```
-
-3. Or manually add a remote and push:
-
-```powershell
-git remote add origin https://github.com/<YOUR-USER>/<REPO>.git
-git branch -M main
-git push -u origin main
-```
-
-Optional: GitHub Actions CI (build + test)
-
-A small workflow is included at `.github/workflows/ci.yml` (builds with Maven and runs tests). You can extend this to build and push the container image to Artifact Registry or GCR.
-
-## GitHub Actions: Automated build, push and deploy to Cloud Run
-
-This repository includes a workflow at `.github/workflows/cloud-run-deploy.yml` that will:
-- Build the Docker image
-- Push the image to Google Container Registry (GCR)
-- Deploy the image to Cloud Run
-
-The workflow runs on pushes to `main` and requires the following GitHub repository secrets to be configured:
-- `GCP_PROJECT` — your GCP project id (e.g. `my-gcp-project`)
-- `GCP_SA_KEY` — JSON service account key (contents of the key file)
-- `CLOUD_RUN_REGION` — the region to deploy Cloud Run to (e.g. `us-central1`)
-
-How to create the service account and key
-
-1. Create a service account and grant it permissions (run this with a user who has Owner or IAM Admin privileges):
-
-```powershell
-gcloud iam service-accounts create github-actions-sa --display-name "GitHub Actions CI";
-```
-
-2. Assign required roles to the service account (adjust as needed):
-
-```powershell
-gcloud projects add-iam-policy-binding PROJECT_ID --member "serviceAccount:github-actions-sa@PROJECT_ID.iam.gserviceaccount.com" --role "roles/run.admin";
-gcloud projects add-iam-policy-binding PROJECT_ID --member "serviceAccount:github-actions-sa@PROJECT_ID.iam.gserviceaccount.com" --role "roles/storage.admin";
-```
-
-Notes: For pushing to GCR the service account needs permission to write to Container Registry (Storage roles). If you use Artifact Registry replace the storage role with `roles/artifactregistry.writer` and adjust the workflow.
-
-3. Generate a JSON key for the service account and store it locally (the file will contain the JSON you will paste into the GitHub secret):
-
-```powershell
-gcloud iam service-accounts keys create key.json --iam-account github-actions-sa@PROJECT_ID.iam.gserviceaccount.com
-```
-
-4. Add the secrets to your GitHub repository (via web UI: Settings -> Secrets -> Actions -> New repository secret), or using the `gh` CLI:
-
-```powershell
-# Example using gh CLI (if installed and authenticated locally)
 gh secret set GCP_PROJECT --body "PROJECT_ID"
-gh secret set CLOUD_RUN_REGION --body "us-central1"
+gh secret set CLOUD_RUN_REGION --body "asia-south2"
+gh secret set ARTIFACT_REGISTRY_REPO --body "demo-repo"
 gh secret set GCP_SA_KEY --body "$(Get-Content key.json -Raw)"
 ```
 
-Workflow details
+Make sure the secret values match the project/region/repo you created in GCP.
 
-- The workflow builds the Docker image and tags it as `gcr.io/<PROJECT>/demo:<commit-sha>`.
-- It configures Docker to use the `gcloud` credential helper and pushes the image to GCR.
-- It then deploys to Cloud Run (service name `demo-service`) in the region from `CLOUD_RUN_REGION` and allows unauthenticated access.
+How to run the workflow manually
+1. Push your code to a GitHub branch (for example `main`).
 
-Security note
+```powershell
+git add .
+git commit -m "chore: add GH Actions deploy docs"
+git push origin main
+```
 
-- Keep your `GCP_SA_KEY` secret secure. Use least privilege: consider creating a more restricted service account for production with only the roles it needs (for example, `roles/run.admin` + `roles/iam.serviceAccountUser` + `roles/storage.objectAdmin` or `roles/artifactregistry.writer`).
+2. In GitHub UI: Actions -> Build and push Docker image to Artifact Registry and deploy to Cloud Run -> Run workflow -> Select branch -> Run workflow
 
-Troubleshooting
+3. Watch the logs for these key phases:
+- Authenticate to Google Cloud (google-github-actions/auth)
+- Configure docker credential helper for the region (e.g. `asia-south2-docker.pkg.dev`)
+- docker build and docker push to `asia-south2-docker.pkg.dev/PROJECT/REPO/demo:COMMIT_SHA`
+- gcloud run deploy prints the service URL
 
-- If the workflow fails with authentication errors, confirm `GCP_SA_KEY` contains a valid JSON key for the service account and that `GCP_PROJECT` matches the project in the key.
-- If the push to GCR fails, verify the service account has storage permissions or switch to Artifact Registry and update the workflow accordingly.
+4. Visit the printed Cloud Run service URL and verify `GET /` returns `Hello, world!`
 
-Notes
-- This sample uses Maven and Eclipse Temurin JRE in the runtime image. You can swap to distroless images for smaller images.
-- For production, enable vulnerability scanning, use Artifact Registry, and restrict unauthenticated access as needed.
+Notes for juniors and instructors
+- Local dev: you can run and test the API locally using Java and Maven; Docker is only required on the CI runner.
+- CI building: the GitHub Actions runner will build the image, push, and deploy — no Docker on the developer machine required.
+- Security: storing a long-lived JSON key in GitHub secrets is fine for a learning demo, but for public repos or production use Workload Identity Federation (WIF). If you want, I can provide WIF setup instructions and a workflow change that avoids JSON keys.
+
+Troubleshooting quick hits
+- Repository-not-found on push: ensure `ARTIFACT_REGISTRY_REPO` was created in the same region as `CLOUD_RUN_REGION`. The workflow builds an image for `{{CLOUD_RUN_REGION}}-docker.pkg.dev/PROJECT/REPO/...`.
+- Permission denied on push: ensure the service account has `roles/artifactregistry.writer`.
+- Auth errors: confirm `GCP_SA_KEY` JSON belongs to the same `GCP_PROJECT`.
+
+Where to look for more help
+- `docs/gcp-artifactregistry-remediation.md` — exact PowerShell commands to create the repo, SA, roles, and key.
+- `docs/test-checklist.md` — guidance to test locally and via Actions.
+- `docs/troubleshooting.md` — common errors and fixes.
+
+Enjoy! Once you push this repo to GitHub and add the required secrets, anyone in your team can run the workflow manually to deploy to Cloud Run without running Docker locally.
